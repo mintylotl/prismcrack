@@ -9,7 +9,7 @@
   };
 
   inputs = {
-    nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz";
+    nixpkgs.url = "https://channels.nixos.org/release-26.05/nixexprs.tar.xz";
 
     libnbtplusplus = {
       url = "github:PrismLauncher/libnbtplusplus";
