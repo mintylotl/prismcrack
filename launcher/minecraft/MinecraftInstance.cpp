@@ -55,6 +55,7 @@
 #include "launch/steps/QuitAfterGameStop.h"
 #include "launch/steps/TextPrint.h"
 
+#include "minecraft/auth/AccountList.h"
 #include "minecraft/launch/AutoInstallJava.h"
 #include "minecraft/launch/ClaimAccount.h"
 #include "minecraft/launch/CreateGameFolders.h"
@@ -136,11 +137,14 @@
             for (int i = 0; i + 1 < envList.size(); i += 2) {
                 env.insert(envList[i], envList[i + 1]);
             }
-            return true;
+            break;
         }
     }
-#endif
+
+    return true;
+#else
     return false;
+#endif
 }
 
 // all of this because keeping things compatible with deprecated old settings
@@ -318,6 +322,22 @@ void MinecraftInstance::populateLaunchMenu(QMenu* menu)
     connect(normalLaunch, &QAction::triggered, this, [this] { APPLICATION->launch(this); });
     connect(normalLaunchOffline, &QAction::triggered, this, [this] { APPLICATION->launch(this, LaunchMode::Offline); });
     connect(normalLaunchDemo, &QAction::triggered, this, [this] { APPLICATION->launch(this, LaunchMode::Demo); });
+
+    auto accounts = APPLICATION->accounts();
+    if (accounts->count() > 1) {
+        QMenu* launchAsMenu = menu->addMenu(tr("Launch &As"));
+        for (int i = 0; i < accounts->count(); i++) {
+            MinecraftAccountPtr account = accounts->at(i);
+            QAction* action = launchAsMenu->addAction(account->displayName());
+            if (auto face = account->getFace(); !face.isNull()) {
+                action->setIcon(face);
+            } else {
+                action->setIcon(QIcon::fromTheme("noaccount"));
+            }
+            connect(action, &QAction::triggered, this,
+                    [this, account] { APPLICATION->launch(this, LaunchMode::Normal, nullptr, account); });
+        }
+    }
 
     QString profilersTitle = tr("Profilers");
     menu->addSeparator()->setText(profilersTitle);
@@ -927,11 +947,6 @@ QStringList MinecraftInstance::verboseDescription(AuthSessionPtr session, Minecr
                 return aName.localeAwareCompare(bName) < 0;
             });
             for (auto mod : modList) {
-                if (mod->type() == ResourceType::FOLDER) {
-                    out << u8"  [🖿] " + mod->fileinfo().completeBaseName() + " (folder)";
-                    continue;
-                }
-
                 if (mod->enabled()) {
                     out << u8"  [✔] " + mod->fileinfo().completeBaseName();
                 } else {
@@ -1095,7 +1110,9 @@ QString MinecraftInstance::getStatusbarDescription()
     QString mcVersion = m_components->getComponentVersion("net.minecraft");
     if (mcVersion.isEmpty()) {
         // Load component info if needed
-        m_components->reload(Net::Mode::Offline);
+        if (auto res = m_components->reload(Net::Mode::Offline); !res) {
+            qWarning() << "Failed to reload components:" << res.error();
+        }
         mcVersion = m_components->getComponentVersion("net.minecraft");
     }
 

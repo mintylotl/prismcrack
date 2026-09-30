@@ -47,9 +47,9 @@
 #include "net/Request.h"
 #include "tasks/Task.h"
 
+#include "Json.h"
 #include "ui/dialogs/CustomMessageBox.h"
 #include "ui/dialogs/ProgressDialog.h"
-#include "ui/instanceview/InstanceDelegate.h"
 
 SkinManageDialog::SkinManageDialog(QWidget* parent, MinecraftAccountPtr acct)
     : QDialog(parent), m_acct(acct), m_ui(new Ui::SkinManageDialog), m_list(this, APPLICATION->settings()->get("SkinsDir").toString(), acct)
@@ -66,21 +66,7 @@ SkinManageDialog::SkinManageDialog(QWidget* parent, MinecraftAccountPtr acct)
     setWindowModality(Qt::WindowModal);
 
     auto* contentsWidget = m_ui->listView;
-    contentsWidget->setViewMode(QListView::IconMode);
-    contentsWidget->setFlow(QListView::LeftToRight);
-    contentsWidget->setIconSize(QSize(48, 48));
-    contentsWidget->setMovement(QListView::Static);
-    contentsWidget->setResizeMode(QListView::Adjust);
-    contentsWidget->setSelectionMode(QAbstractItemView::SingleSelection);
-    contentsWidget->setSpacing(5);
-    contentsWidget->setWordWrap(false);
-    contentsWidget->setWrapping(true);
-    contentsWidget->setUniformItemSizes(true);
-    contentsWidget->setTextElideMode(Qt::ElideRight);
-    contentsWidget->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    contentsWidget->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     contentsWidget->installEventFilter(this);
-    contentsWidget->setItemDelegate(new ListViewDelegate(this));
 
     contentsWidget->setAcceptDrops(true);
     contentsWidget->setDropIndicatorShown(true);
@@ -95,7 +81,7 @@ SkinManageDialog::SkinManageDialog(QWidget* parent, MinecraftAccountPtr acct)
 
     connect(contentsWidget->selectionModel(), &QItemSelectionModel::selectionChanged, this, &SkinManageDialog::selectionChanged);
     connect(m_ui->listView, &QListView::customContextMenuRequested, this, &SkinManageDialog::show_context_menu);
-    connect(m_ui->elytraCB, &QCheckBox::stateChanged, this, [this]() {
+    connect(m_ui->elytraCB, &QCheckBox::checkStateChanged, this, [this]() {
         if (m_skinPreview) {
             m_skinPreview->setElytraVisible(m_ui->elytraCB->isChecked());
         }
@@ -438,7 +424,6 @@ void SkinManageDialog::on_urlBtn_clicked()
 }
 
 namespace {
-
 class WaitTask : public Task {
    public:
     WaitTask() = default;
@@ -505,27 +490,20 @@ void SkinManageDialog::on_userBtn_clicked()
     });
 
     connect(getUUID.get(), &Task::succeeded, this, [uuidLoop, uuidOut, job, getProfile, &failReason] {
-        try {
-            QJsonParseError parseError{};
-            QJsonDocument doc = QJsonDocument::fromJson(*uuidOut, &parseError);
-            if (parseError.error != QJsonParseError::NoError) {
-                qWarning() << "Error while parsing JSON response from Minecraft skin service at" << parseError.offset
-                           << "reason:" << parseError.errorString();
-                failReason = tr("failed to parse get user UUID response");
-                uuidLoop->quit();
-                return;
-            }
-            const auto root = doc.object();
-            auto id = root["id"].toString();
-            if (!id.isEmpty()) {
-                getProfile->setUrl("https://sessionserver.mojang.com/session/minecraft/profile/" + id);
-            } else {
-                failReason = tr("user id is empty");
-                job->abort();
-            }
-        } catch (const Exception& e) {
-            qCritical() << "Couldn't load skin json:" << e.cause();
+        auto doc = Json::requireDocument(*uuidOut, "Minecraft skin service");
+        if (!doc) {
+            qWarning() << "Error while parsing JSON response from Minecraft skin service:" << doc.error();
             failReason = tr("failed to parse get user UUID response");
+            uuidLoop->quit();
+            return;
+        }
+        const auto root = doc->object();
+        auto id = root["id"].toString();
+        if (!id.isEmpty()) {
+            getProfile->setUrl("https://sessionserver.mojang.com/session/minecraft/profile/" + id);
+        } else {
+            failReason = tr("user id is empty");
+            job->abort();
         }
         uuidLoop->quit();
     });
